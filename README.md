@@ -2,7 +2,7 @@
 
 Advanced CODEOWNERS is inspired by [this article](https://www.fullstory.com/blog/taming-github-codeowners-with-bots/), some [limitations of CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-size), and the needs of others, particularly those using a monorepo.
 
-In GitHub CODEOWNERS, order is important; the last matching pattern takes the most precedence. This app allows you to additive codeowners, effectively, through configuration.
+In GitHub CODEOWNERS, order is important; the last matching pattern takes the most precedence. This app allows you to configure additive codeowners, effectively, through configuration.
 
 ## Prerequisites
 ### Bot user
