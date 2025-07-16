@@ -1,0 +1,37 @@
+paths:
+  - path: backend/
+    files:
+      - pattern: "*.pdf"
+        owners:
+        - pdf
+      - pattern: "*"
+        owners:
+        - backend
+  - path: frontend/
+    files:
+      - pattern: "*.pdf"
+        owners:
+        - pdf
+      - pattern: "*.md"
+        owners:
+        - md
+      - pattern: "*"
+        owners:
+        - frontend
+groups:
+  - name: backend
+    owners:
+    - alice
+    - bob
+  - name: frontend
+    owners:
+    - dave
+    - eve
+  - name: pdf
+    owners:
+    - carol
+    - dave
+  - name: md
+    owners:
+    - eve
+    - frank

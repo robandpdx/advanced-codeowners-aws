@@ -2,6 +2,28 @@
 
 Advanced CODEOWNERS is inspired by [this article](https://www.fullstory.com/blog/taming-github-codeowners-with-bots/), some [limitations of CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-size), and the needs of others, particularly those using a monorepo.
 
+In GitHub CODEOWNERS, order is important; the last matching pattern takes the most precedence. This app allows you to additive codeowners, effectively, through configuration.
+
+## Prerequisites
+### Bot user
+You'll need to provide this app with a GitHub PAT to use. The best option is to create a bot account rather than using a personal account.
+### Teams
+To use this app, you'll need to configure teams in your organization that end in `-approvers`.
+For example, you might create the following teams in your org:
+```
+frontend-approvers
+backend-approvers
+```
+Add the bot user to each team.
+###  Config files
+You'll add a `yaml` config file to the repo for each team in `$CONFIG_PATH/`, naming the config file for each team as follows:
+| Team Name         | Config File Path                |
+|-------------------|---------------------------------|
+| frontend-approvers| `$CONFIG_PATH/frontend-approvers.yaml` |
+| backend-approvers | `$CONFIG_PATH/backend-approvers.yaml`  |
+
+The structure of the config file can be seen in [example-approvers.yaml](./example-approvers.yaml).
+
 ## Local setup
 
 Install dependencies
