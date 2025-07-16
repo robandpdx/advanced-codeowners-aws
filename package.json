@@ -1,0 +1,28 @@
+{
+  "name": "@robandpdx/advanced-codeowners-aws",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Advanced CODEOWNERS for AWS",
+  "main": "app.js",
+  "scripts": {
+    "start": "probot run ./app.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "@probot/adapter-aws-lambda-serverless": "^4.0.2"
+  },
+  "repository": "github:robandpdx/advanced-codeowners-aws",
+  "keywords": [],
+  "author": "Robert Anderson (https://github.com/robandpdx)",
+  "license": "MIT",
+  "devDependencies": {
+    "mocha": "^11.1.0",
+    "nock": "^14.0.1",
+    "uvu": "^0.5.6"
+  },
+  "release": {
+    "branches": [
+      "main"
+    ]
+  }
+}
