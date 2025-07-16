@@ -29,10 +29,7 @@ test.before.each(() => {
   probot.load(app);
 });
 
-test("receives pull_request.review_requested event when bot is requested", async function () {
-  // Set the BOT_USERNAME environment variable for this test
-  process.env.BOT_USERNAME = "robandpdx_volcano";
-  
+test("receives pull_request.review_requested event when team ending with -approvers is requested", async function () {
   const mock = nock("https://api.github.com")
     .post(
       "/repos/robandpdx/advanced-codeowners-aws/issues/123/comments",
@@ -57,8 +54,8 @@ test("receives pull_request.review_requested event when bot is requested", async
       pull_request: {
         number: 123,
       },
-      requested_reviewer: {
-        login: "robandpdx_volcano",
+      requested_team: {
+        name: "frontend-approvers",
       },
     },
   });
@@ -66,10 +63,7 @@ test("receives pull_request.review_requested event when bot is requested", async
   assert.equal(mock.activeMocks(), []);
 });
 
-test("does not comment when different user is requested as reviewer", async function () {
-  // Set the BOT_USERNAME environment variable for this test
-  process.env.BOT_USERNAME = "robandpdx_volcano";
-  
+test("does not comment when team not ending with -approvers is requested", async function () {
   // No mock needed since no API call should be made
   
   await probot.receive({
@@ -86,8 +80,8 @@ test("does not comment when different user is requested as reviewer", async func
       pull_request: {
         number: 456,
       },
-      requested_reviewer: {
-        login: "different-user",
+      requested_team: {
+        name: "frontend",
       },
     },
   });

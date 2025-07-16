@@ -5,11 +5,11 @@ module.exports = (app) => {
   console.log("Yay! The app was loaded!");
 
   app.on("pull_request.review_requested", async (context) => {
-    const { pull_request, requested_reviewer } = context.payload;
+    const { pull_request, requested_team } = context.payload;
     
-    // Check if the requested reviewer is our bot
-    if (requested_reviewer && requested_reviewer.login === process.env.BOT_USERNAME) {
-      console.log(`Bot ${process.env.BOT_USERNAME} was requested as reviewer for PR #${pull_request.number}`);
+    // Check if the requested team ends with -apprivers
+    if (requested_team && requested_team.name.endsWith('-approvers')) {
+      console.log(`Team ${requested_team.name} was requested as reviewer for PR #${pull_request.number}`);
       
       // Comment on the PR
       return context.octokit.issues.createComment({
