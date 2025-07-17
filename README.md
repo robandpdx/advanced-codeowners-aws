@@ -23,6 +23,14 @@ You'll add a `yaml` config file to the repo for each team in `$CONFIG_PATH/`, na
 | backend-approvers | `$CONFIG_PATH/backend-approvers.yaml`  |
 
 The structure of the config file can be seen in [example-approvers.yaml](./example-approvers.yaml).
+### CODEOWNERS
+Setup you CODEOWNERS file as follows:
+```
+frontend/**/*  @org-name/frontend-approvers
+backend/**/*   @org-name-volcano/backend-approvers
+```
+
+**Note:** For simpler use cases, you could create a single team, use a single config file, and configure your `CODEOWNERS` file to send everything to the single team. `*  @org-name/monorepo-approvers`
 
 ## Local setup
 
