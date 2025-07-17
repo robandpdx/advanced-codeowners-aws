@@ -1,23 +1,19 @@
-paths:
-  - path: backend/
-    files:
-      - pattern: "*.pdf"
-        owners:
-        - pdf
-      - pattern: "*"
-        owners:
-        - backend
-  - path: frontend/
-    files:
-      - pattern: "*.pdf"
-        owners:
-        - pdf
-      - pattern: "*.md"
-        owners:
-        - md
-      - pattern: "*"
-        owners:
-        - frontend
+patterns:
+  - pattern: "backend/**/*.pdf"
+    owners:
+    - pdf
+  - pattern: "backend/**/*"
+    owners:
+    - backend
+  - pattern: "frontend/**/*.pdf"
+    owners:
+    - pdf
+  - pattern: "frontend/**/*.md"
+    owners:
+    - md
+  - pattern: "frontend/**/*"
+    owners:
+    - frontend
 groups:
   - name: backend
     owners:
