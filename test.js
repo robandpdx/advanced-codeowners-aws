@@ -591,4 +591,189 @@ patterns:
   // No additional assertions needed since no review request mocks were set up
 });
 
+test("handles pull_request_review.submitted event for approved reviews", async function () {
+  // Set CONFIG_PATH environment variable
+  process.env.CONFIG_PATH = ".github/approvers";
+
+  const configMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(200, {
+      content: configContent,
+      encoding: "base64"
+    })
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Fbackend-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(404, { message: "Not Found" })
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffullstack-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(404, { message: "Not Found" })
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Fplatform-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(404, { message: "Not Found" });
+
+  // Mock the PR files list
+  const filesMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/pulls/456/files")
+    .reply(200, [
+      { filename: "frontend/app.js" },
+      { filename: "backend/report.pdf" }
+    ]);
+
+  // Mock team membership check
+  const teamMembershipMock = nock("https://api.github.com")
+    .get("/orgs/robandpdx/teams/frontend-team/memberships/tclifton_volcano")
+    .reply(200, { state: "active" })
+    .get("/orgs/robandpdx/teams/pfd-team/memberships/tclifton_volcano")
+    .reply(404, { message: "Not Found" })
+    .get("/orgs/robandpdx/teams/backend-team/memberships/tclifton_volcano")
+    .reply(404, { message: "Not Found" });
+
+  // Mock the comment that should be posted
+  const commentMock = nock("https://api.github.com")
+    .post(
+      "/repos/robandpdx/advanced-codeowners-aws/issues/456/comments",
+      (requestBody) => {
+        assert.ok(requestBody.body.includes("## ✅ Review Approval Received"), "Should contain approval header");
+        assert.ok(requestBody.body.includes("@tclifton_volcano"), "Should mention the reviewer");
+        assert.ok(requestBody.body.includes("frontend/app.js"), "Should list satisfied files");
+        assert.ok(requestBody.body.includes("Individual approver"), "Should show individual approver status");
+        assert.ok(requestBody.body.includes("Team member of: frontend-team"), "Should show team membership");
+        return true;
+      }
+    )
+    .reply(201, {});
+
+  await probot.receive({
+    name: "pull_request_review",
+    id: "9",
+    payload: {
+      action: "submitted",
+      repository: {
+        owner: {
+          login: "robandpdx",
+        },
+        name: "advanced-codeowners-aws",
+      },
+      pull_request: {
+        number: 456,
+        base: {
+          ref: "main"
+        }
+      },
+      review: {
+        state: "approved",
+        user: {
+          login: "tclifton_volcano"
+        }
+      }
+    },
+  });
+
+  // Verify all mocks were called
+  assert.ok(configMock.isDone(), "Config files should have been checked");
+  assert.ok(filesMock.isDone(), "PR files should have been fetched");
+  assert.ok(teamMembershipMock.isDone(), "Team memberships should have been checked");
+  assert.ok(commentMock.isDone(), "Approval comment should have been posted");
+});
+
+test("ignores pull_request_review.submitted event for non-approved reviews", async function () {
+  // No mocks needed since no API calls should be made
+  
+  await probot.receive({
+    name: "pull_request_review",
+    id: "10",
+    payload: {
+      action: "submitted",
+      repository: {
+        owner: {
+          login: "robandpdx",
+        },
+        name: "advanced-codeowners-aws",
+      },
+      pull_request: {
+        number: 789,
+        base: {
+          ref: "main"
+        }
+      },
+      review: {
+        state: "changes_requested",
+        user: {
+          login: "some_reviewer"
+        }
+      }
+    },
+  });
+
+  // Test passes if no HTTP calls were made (no mock to verify)
+});
+
+test("handles pull_request_review.submitted when reviewer doesn't satisfy any requirements", async function () {
+  // Set CONFIG_PATH environment variable
+  process.env.CONFIG_PATH = ".github/approvers";
+
+  const configMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(200, {
+      content: configContent,
+      encoding: "base64"
+    })
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Fbackend-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(404, { message: "Not Found" })
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffullstack-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(404, { message: "Not Found" })
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Fplatform-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(404, { message: "Not Found" });
+
+  // Mock the PR files list
+  const filesMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/pulls/999/files")
+    .reply(200, [
+      { filename: "frontend/app.js" }
+    ]);
+
+  // Mock team membership check - user is not a member of any teams
+  const teamMembershipMock = nock("https://api.github.com")
+    .get("/orgs/robandpdx/teams/frontend-team/memberships/random_user")
+    .reply(404, { message: "Not Found" });
+
+  // No comment should be posted since the user doesn't satisfy any requirements
+
+  await probot.receive({
+    name: "pull_request_review",
+    id: "11",
+    payload: {
+      action: "submitted",
+      repository: {
+        owner: {
+          login: "robandpdx",
+        },
+        name: "advanced-codeowners-aws",
+      },
+      pull_request: {
+        number: 999,
+        base: {
+          ref: "main"
+        }
+      },
+      review: {
+        state: "approved",
+        user: {
+          login: "random_user"
+        }
+      }
+    },
+  });
+
+  // Verify mocks were called but no comment was posted
+  assert.ok(configMock.isDone(), "Config files should have been checked");
+  assert.ok(filesMock.isDone(), "PR files should have been fetched");
+  assert.ok(teamMembershipMock.isDone(), "Team membership should have been checked");
+});
+
 test.run();
