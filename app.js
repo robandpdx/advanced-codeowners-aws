@@ -43,7 +43,7 @@ module.exports = (app) => {
    * @param {object} context - Probot context object
    * @param {object} pull_request - Pull request object
    * @param {object} approversConfig - Approvers configuration object
-   * @returns {Promise<Map<string, string[]>>} - Map of file paths to arrays of approvers
+   * @returns {Promise<{fileApproverMap: Map<string, string[]>, fileTeamApproverMap: Map<string, string[]>}>} - Maps of file paths to arrays of approvers and team approvers
    */
   async function findApprovers(context, pull_request, approversConfig) {
     const { minimatch } = require('minimatch');
@@ -55,43 +55,68 @@ module.exports = (app) => {
     });
 
     const fileApproverMap = new Map();
+    const fileTeamApproverMap = new Map();
     
     // Iterate through each file in the PR
     for (const file of files.data) {
       const filePath = file.filename;
       const approvers = new Set(); // Use Set to avoid duplicates
+      const teamApprovers = new Set(); // Use Set to avoid duplicates
       
       // Check if config has patterns section
       if (approversConfig.patterns) {
         // Iterate through each pattern in the config
-        for (const pattern of Object.keys(approversConfig.patterns)) {
+        for (const patternConfig of approversConfig.patterns) {
+          const pattern = patternConfig.pattern;
+          
           // Use minimatch to check if file matches the pattern
           if (minimatch(filePath, pattern)) {
-            const patternApprovers = approversConfig.patterns[pattern];
-            // Add approvers (can be string or array)
-            if (Array.isArray(patternApprovers)) {
-              patternApprovers.forEach(approver => approvers.add(approver));
-            } else if (typeof patternApprovers === 'string') {
-              approvers.add(patternApprovers);
+            // Add individual owners
+            if (patternConfig.owners) {
+              if (Array.isArray(patternConfig.owners)) {
+                patternConfig.owners.forEach(approver => approvers.add(approver));
+              } else if (typeof patternConfig.owners === 'string') {
+                approvers.add(patternConfig.owners);
+              }
+            }
+            
+            // Add team owners
+            if (patternConfig['team-owners']) {
+              if (Array.isArray(patternConfig['team-owners'])) {
+                patternConfig['team-owners'].forEach(teamApprover => teamApprovers.add(teamApprover));
+              } else if (typeof patternConfig['team-owners'] === 'string') {
+                teamApprovers.add(patternConfig['team-owners']);
+              }
             }
           }
         }
       }
       
       // If no specific pattern matched, use fallback approvers if available
-      if (approvers.size === 0 && approversConfig.fallback) {
-        if (Array.isArray(approversConfig.fallback)) {
-          approversConfig.fallback.forEach(approver => approvers.add(approver));
-        } else if (typeof approversConfig.fallback === 'string') {
-          approvers.add(approversConfig.fallback);
+      if (approvers.size === 0 && teamApprovers.size === 0 && approversConfig.fallback) {
+        if (approversConfig.fallback.owners) {
+          if (Array.isArray(approversConfig.fallback.owners)) {
+            approversConfig.fallback.owners.forEach(approver => approvers.add(approver));
+          } else if (typeof approversConfig.fallback.owners === 'string') {
+            approvers.add(approversConfig.fallback.owners);
+          }
+        }
+        
+        if (approversConfig.fallback['team-owners']) {
+          if (Array.isArray(approversConfig.fallback['team-owners'])) {
+            approversConfig.fallback['team-owners'].forEach(teamApprover => teamApprovers.add(teamApprover));
+          } else if (typeof approversConfig.fallback['team-owners'] === 'string') {
+            teamApprovers.add(approversConfig.fallback['team-owners']);
+          }
         }
       }
       
-      // Convert Set to Array and store in map
+      // Convert Set to Array and store in maps
       fileApproverMap.set(filePath, Array.from(approvers));
+      fileTeamApproverMap.set(filePath, Array.from(teamApprovers));
     }
     
-    return fileApproverMap;
+    return { fileApproverMap, fileTeamApproverMap };
   }
 
   /**
@@ -99,34 +124,60 @@ module.exports = (app) => {
    * @param {object} context - Probot context object
    * @param {object} pull_request - Pull request object
    * @param {Map<string, string[]>} fileApproverMap - Map of file paths to arrays of approvers
+   * @param {Map<string, string[]>} fileTeamApproverMap - Map of file paths to arrays of team approvers
    * @returns {Promise<void>}
    */
-  async function requestReviewsFromApprovers(context, pull_request, fileApproverMap) {
+  async function requestReviewsFromApprovers(context, pull_request, fileApproverMap, fileTeamApproverMap) {
     // Collect all unique approvers from the fileApproverMap
     const allApprovers = new Set();
     for (const approvers of fileApproverMap.values()) {
       approvers.forEach(approver => allApprovers.add(approver));
     }
+    
+    // Collect all unique team approvers from the fileTeamApproverMap
+    const allTeamApprovers = new Set();
+    for (const teamApprovers of fileTeamApproverMap.values()) {
+      teamApprovers.forEach(teamApprover => allTeamApprovers.add(teamApprover));
+    }
 
-    // Request reviews from all unique approvers
-    if (allApprovers.size > 0) {
+    // Request reviews from all unique approvers and team approvers
+    if (allApprovers.size > 0 || allTeamApprovers.size > 0) {
       const reviewers = Array.from(allApprovers);
-      console.log(`Requesting reviews from: ${reviewers.join(', ')}`);
+      const teamReviewers = Array.from(allTeamApprovers);
+      
+      console.log(`Requesting reviews from individuals: ${reviewers.join(', ')}`);
+      console.log(`Requesting reviews from teams: ${teamReviewers.join(', ')}`);
       
       try {
+        const requestBody = {};
+        if (reviewers.length > 0) {
+          requestBody.reviewers = reviewers;
+        }
+        if (teamReviewers.length > 0) {
+          requestBody.team_reviewers = teamReviewers;
+        }
+        
         await context.octokit.pulls.requestReviewers({
           owner: context.payload.repository.owner.login,
           repo: context.payload.repository.name,
           pull_number: pull_request.number,
-          reviewers: reviewers
+          ...requestBody
         });
         
         // Post confirmation comment
+        let confirmationMessage = "✅ Review requests have been sent to:";
+        if (reviewers.length > 0) {
+          confirmationMessage += `\n**Individual reviewers:** ${reviewers.join(', ')}`;
+        }
+        if (teamReviewers.length > 0) {
+          confirmationMessage += `\n**Team reviewers:** ${teamReviewers.join(', ')}`;
+        }
+        
         await context.octokit.issues.createComment({
           owner: context.payload.repository.owner.login,
           repo: context.payload.repository.name,
           issue_number: pull_request.number,
-          body: `✅ Review requests have been sent to: ${reviewers.join(', ')}`
+          body: confirmationMessage
         });
       } catch (error) {
         console.error('Failed to request reviews:', error.message);
@@ -145,9 +196,10 @@ module.exports = (app) => {
   /**
    * Generate a detailed comment body with file approvers
    * @param {Map<string, string[]>} fileApproverMap - Map of file paths to arrays of approvers
+   * @param {Map<string, string[]>} fileTeamApproverMap - Map of file paths to arrays of team approvers
    * @returns {string} - Formatted comment body
    */
-  function generateApproversComment(fileApproverMap) {
+  function generateApproversComment(fileApproverMap, fileTeamApproverMap) {
     let commentBody = "## 📋 Approvers Required\n\n";
     
     if (fileApproverMap.size === 0) {
@@ -159,7 +211,9 @@ module.exports = (app) => {
       const approverToFiles = new Map();
       
       for (const [filePath, approvers] of fileApproverMap) {
-        if (approvers.length === 0) {
+        const teamApprovers = fileTeamApproverMap.get(filePath) || [];
+        
+        if (approvers.length === 0 && teamApprovers.length === 0) {
           // Files with no approvers
           const key = "_no_approvers";
           if (!approverToFiles.has(key)) {
@@ -168,7 +222,15 @@ module.exports = (app) => {
           approverToFiles.get(key).push(filePath);
         } else {
           // Files with approvers
-          const approverKey = approvers.sort().join(", ");
+          let approverKey = "";
+          if (approvers.length > 0) {
+            approverKey += `Individual: ${approvers.sort().join(", ")}`;
+          }
+          if (teamApprovers.length > 0) {
+            if (approverKey) approverKey += " | ";
+            approverKey += `Teams: ${teamApprovers.sort().join(", ")}`;
+          }
+          
           if (!approverToFiles.has(approverKey)) {
             approverToFiles.set(approverKey, []);
           }
@@ -195,15 +257,24 @@ module.exports = (app) => {
       // Add summary
       const totalFiles = fileApproverMap.size;
       const uniqueApprovers = new Set();
+      const uniqueTeamApprovers = new Set();
+      
       for (const approvers of fileApproverMap.values()) {
         approvers.forEach(approver => uniqueApprovers.add(approver));
       }
       
+      for (const teamApprovers of fileTeamApproverMap.values()) {
+        teamApprovers.forEach(teamApprover => uniqueTeamApprovers.add(teamApprover));
+      }
+      
       commentBody += "---\n";
-      commentBody += `**Summary:** ${totalFiles} file(s) requiring approval from ${uniqueApprovers.size} approver(s)\n`;
+      commentBody += `**Summary:** ${totalFiles} file(s) requiring approval\n`;
       
       if (uniqueApprovers.size > 0) {
-        commentBody += `**All required approvers:** ${Array.from(uniqueApprovers).sort().join(", ")}\n`;
+        commentBody += `**Individual approvers:** ${Array.from(uniqueApprovers).sort().join(", ")}\n`;
+      }
+      if (uniqueTeamApprovers.size > 0) {
+        commentBody += `**Team approvers:** ${Array.from(uniqueTeamApprovers).sort().join(", ")}\n`;
       }
     }
     
@@ -239,10 +310,10 @@ module.exports = (app) => {
       });
 
       // Find approvers for the files in the PR
-      const fileApproverMap = await findApprovers(context, pull_request, approversConfig);
+      const { fileApproverMap, fileTeamApproverMap } = await findApprovers(context, pull_request, approversConfig);
       
       // Generate detailed comment with file approvers
-      const commentBody = generateApproversComment(fileApproverMap);
+      const commentBody = generateApproversComment(fileApproverMap, fileTeamApproverMap);
       
       // Post the detailed comment
       await context.octokit.issues.createComment({
@@ -253,7 +324,7 @@ module.exports = (app) => {
       });
 
       // Request reviews from all approvers
-      await requestReviewsFromApprovers(context, pull_request, fileApproverMap);
+      await requestReviewsFromApprovers(context, pull_request, fileApproverMap, fileTeamApproverMap);
 
       }
   });

@@ -36,21 +36,34 @@ test.after.each(() => {
   delete process.env.CONFIG_PATH;
 });
 
+const configContent = Buffer.from(`
+patterns:
+  - pattern: "backend/**/*.pdf"
+    team-owners:
+    - "pfd-team"
+  - pattern: "backend/**/*"
+    owners:
+    - "tclifton_volcano"
+    team-owners:
+    - "backend-team"
+  - pattern: "frontend/**/*.pdf"
+    team-owners:
+    - "pdf-team"
+  - pattern: "frontend/**/*.md"
+    owners:
+    - "tclifton_volcano"
+    team-owners:
+    - "markdown-team"
+  - pattern: "frontend/**/*"
+    owners:
+    - "tclifton_volcano"
+    team-owners:
+    - "frontend-team"
+`).toString('base64');
+
 test("receives pull_request.review_requested event when team ending with -approvers is requested", async function () {
   // Set CONFIG_PATH environment variable
   process.env.CONFIG_PATH = ".github/approvers";
-
-  // Mock the config file read
-  const configContent = Buffer.from(`
-patterns:
-  "src/**/*.js":
-    - "frontend-dev1"
-    - "frontend-dev2"
-  "docs/**": "tech-writer"
-  "*.md": "product-manager"
-fallback:
-  - "team-lead"
-`).toString('base64');
 
   const configMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
@@ -64,9 +77,9 @@ fallback:
   const filesMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/pulls/123/files")
     .reply(200, [
-      { filename: "src/components/Button.js" },
-      { filename: "docs/README.md" },
-      { filename: "package.json" }
+      { filename: "backend/report.pdf" },
+      { filename: "frontend/docs.md" },
+      { filename: "frontend/app.js" }
     ]);
 
   const commentMock = nock("https://api.github.com")
@@ -83,10 +96,10 @@ fallback:
       (requestBody) => {
         // Verify the detailed comment contains expected elements
         assert.ok(requestBody.body.includes("## 📋 Approvers Required"), "Should contain approvers header");
-        assert.ok(requestBody.body.includes("frontend-dev1"), "Should contain frontend-dev1");
-        assert.ok(requestBody.body.includes("tech-writer"), "Should contain tech-writer");
-        assert.ok(requestBody.body.includes("src/components/Button.js"), "Should contain JS file");
-        assert.ok(requestBody.body.includes("docs/README.md"), "Should contain docs file");
+        assert.ok(requestBody.body.includes("tclifton_volcano"), "Should contain tclifton_volcano");
+        assert.ok(requestBody.body.includes("pfd-team"), "Should contain pfd-team");
+        assert.ok(requestBody.body.includes("markdown-team"), "Should contain markdown-team");
+        assert.ok(requestBody.body.includes("frontend-team"), "Should contain frontend-team");
         return true;
       }
     )
@@ -96,10 +109,10 @@ fallback:
       (requestBody) => {
         // Verify the confirmation comment
         assert.ok(requestBody.body.includes("✅ Review requests have been sent to:"), "Should contain confirmation message");
-        assert.ok(requestBody.body.includes("frontend-dev1"), "Should mention frontend-dev1");
-        assert.ok(requestBody.body.includes("frontend-dev2"), "Should mention frontend-dev2");
-        assert.ok(requestBody.body.includes("tech-writer"), "Should mention tech-writer");
-        assert.ok(requestBody.body.includes("team-lead"), "Should mention team-lead");
+        assert.ok(requestBody.body.includes("tclifton_volcano"), "Should mention tclifton_volcano");
+        assert.ok(requestBody.body.includes("pfd-team"), "Should mention pfd-team");
+        assert.ok(requestBody.body.includes("markdown-team"), "Should mention markdown-team");
+        assert.ok(requestBody.body.includes("frontend-team"), "Should mention frontend-team");
         return true;
       }
     )
@@ -110,12 +123,15 @@ fallback:
     .post(
       "/repos/robandpdx/advanced-codeowners-aws/pulls/123/requested_reviewers",
       (requestBody) => {
-        // Verify that all unique approvers are requested
-        const expectedReviewers = ["frontend-dev1", "frontend-dev2", "tech-writer", "team-lead"];
+        // Verify that individual reviewers are requested
         assert.ok(Array.isArray(requestBody.reviewers), "Should send reviewers array");
-        assert.equal(requestBody.reviewers.length, 4, "Should request 4 unique reviewers");
-        expectedReviewers.forEach(reviewer => {
-          assert.ok(requestBody.reviewers.includes(reviewer), `Should include ${reviewer}`);
+        assert.ok(requestBody.reviewers.includes("tclifton_volcano"), "Should include tclifton_volcano");
+        
+        // Verify that team reviewers are requested
+        assert.ok(Array.isArray(requestBody.team_reviewers), "Should send team_reviewers array");
+        const expectedTeams = ["pfd-team", "markdown-team", "frontend-team"];
+        expectedTeams.forEach(team => {
+          assert.ok(requestBody.team_reviewers.includes(team), `Should include ${team}`);
         });
         return true;
       }
@@ -233,17 +249,6 @@ test("comment generation handles various file scenarios", async function () {
   // Set CONFIG_PATH environment variable
   process.env.CONFIG_PATH = ".github/approvers";
 
-  // Create config with different scenarios
-  const configContent = Buffer.from(`
-patterns:
-  "src/**/*.js": "js-developer"
-  "docs/**": 
-    - "tech-writer"
-    - "product-manager"
-fallback:
-  - "fallback-reviewer"
-`).toString('base64');
-
   const configMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
     .query({ ref: "main" })
@@ -256,9 +261,9 @@ fallback:
   const filesMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/pulls/999/files")
     .reply(200, [
-      { filename: "src/app.js" },          // matches js pattern -> js-developer
-      { filename: "docs/README.md" },      // matches docs pattern -> tech-writer, product-manager
-      { filename: "package.json" }         // no match -> fallback-reviewer
+      { filename: "backend/report.pdf" },      // matches backend pdf pattern -> pfd-team
+      { filename: "frontend/docs.md" },        // matches frontend md pattern -> tclifton_volcano, markdown-team
+      { filename: "frontend/app.js" }          // matches frontend pattern -> tclifton_volcano, frontend-team
     ]);
 
   const commentMock = nock("https://api.github.com")
@@ -276,12 +281,13 @@ fallback:
         const body = requestBody.body;
         // Verify comment structure
         assert.ok(body.includes("## 📋 Approvers Required"), "Should contain header");
-        assert.ok(body.includes("👥 Approvers: js-developer"), "Should show js-developer");
-        assert.ok(body.includes("👥 Approvers: product-manager, tech-writer"), "Should show docs approvers");
-        assert.ok(body.includes("👥 Approvers: fallback-reviewer"), "Should show fallback");
-        assert.ok(body.includes("src/app.js"), "Should list js file");
-        assert.ok(body.includes("docs/README.md"), "Should list docs file");
-        assert.ok(body.includes("package.json"), "Should list fallback file");
+        assert.ok(body.includes("tclifton_volcano"), "Should show tclifton_volcano");
+        assert.ok(body.includes("pfd-team"), "Should show pfd-team");
+        assert.ok(body.includes("markdown-team"), "Should show markdown-team");
+        assert.ok(body.includes("frontend-team"), "Should show frontend-team");
+        assert.ok(body.includes("backend/report.pdf"), "Should list pdf file");
+        assert.ok(body.includes("frontend/docs.md"), "Should list md file");
+        assert.ok(body.includes("frontend/app.js"), "Should list js file");
         assert.ok(body.includes("**Summary:**"), "Should contain summary");
         return true;
       }
@@ -292,10 +298,10 @@ fallback:
       (requestBody) => {
         // Verify the confirmation comment for review requests
         assert.ok(requestBody.body.includes("✅ Review requests have been sent to:"), "Should contain confirmation message");
-        const expectedApprovers = ["js-developer", "tech-writer", "product-manager", "fallback-reviewer"];
-        expectedApprovers.forEach(approver => {
-          assert.ok(requestBody.body.includes(approver), `Should mention ${approver} in confirmation`);
-        });
+        assert.ok(requestBody.body.includes("tclifton_volcano"), "Should mention tclifton_volcano");
+        assert.ok(requestBody.body.includes("pfd-team"), "Should mention pfd-team");
+        assert.ok(requestBody.body.includes("markdown-team"), "Should mention markdown-team");
+        assert.ok(requestBody.body.includes("frontend-team"), "Should mention frontend-team");
         return true;
       }
     )
@@ -306,11 +312,13 @@ fallback:
     .post(
       "/repos/robandpdx/advanced-codeowners-aws/pulls/999/requested_reviewers",
       (requestBody) => {
-        const expectedReviewers = ["js-developer", "tech-writer", "product-manager", "fallback-reviewer"];
         assert.ok(Array.isArray(requestBody.reviewers), "Should send reviewers array");
-        assert.equal(requestBody.reviewers.length, 4, "Should request 4 unique reviewers");
-        expectedReviewers.forEach(reviewer => {
-          assert.ok(requestBody.reviewers.includes(reviewer), `Should include ${reviewer}`);
+        assert.ok(requestBody.reviewers.includes("tclifton_volcano"), "Should include tclifton_volcano");
+        
+        assert.ok(Array.isArray(requestBody.team_reviewers), "Should send team_reviewers array");
+        const expectedTeams = ["pfd-team", "markdown-team", "frontend-team"];
+        expectedTeams.forEach(team => {
+          assert.ok(requestBody.team_reviewers.includes(team), `Should include ${team}`);
         });
         return true;
       }
@@ -351,12 +359,6 @@ test("handles review request failures gracefully", async function () {
   // Set CONFIG_PATH environment variable
   process.env.CONFIG_PATH = ".github/approvers";
 
-  // Mock the config file read
-  const configContent = Buffer.from(`
-patterns:
-  "*.js": "js-dev"
-`).toString('base64');
-
   const configMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
     .query({ ref: "main" })
@@ -369,7 +371,7 @@ patterns:
   const filesMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/pulls/555/files")
     .reply(200, [
-      { filename: "app.js" }
+      { filename: "backend/report.pdf" }
     ]);
 
   const commentMock = nock("https://api.github.com")
@@ -394,7 +396,7 @@ patterns:
       (requestBody) => {
         // Verify the error comment
         assert.ok(requestBody.body.includes("⚠️ Failed to request reviews"), "Should contain error message");
-        assert.ok(requestBody.body.includes("User not found"), "Should contain specific error");
+        assert.ok(requestBody.body.includes("Team not found"), "Should contain specific error");
         return true;
       }
     )
@@ -403,7 +405,7 @@ patterns:
   // Mock the review request API call to fail
   const reviewRequestMock = nock("https://api.github.com")
     .post("/repos/robandpdx/advanced-codeowners-aws/pulls/555/requested_reviewers")
-    .reply(422, { message: "User not found" });
+    .reply(422, { message: "Team not found" });
 
   await probot.receive({
     name: "pull_request",
@@ -439,13 +441,6 @@ test("requestReviewsFromApprovers function handles successful review requests", 
   // This test verifies the requestReviewsFromApprovers function works correctly
   process.env.CONFIG_PATH = ".github/approvers";
 
-  const configContent = Buffer.from(`
-patterns:
-  "*.js": ["dev1", "dev2"]
-  "*.md": ["writer"]
-  "*.py": ["dev1"]
-`).toString('base64');
-
   const configMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ftest-approvers.yaml")
     .query({ ref: "main" })
@@ -457,9 +452,9 @@ patterns:
   const filesMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/pulls/777/files")
     .reply(200, [
-      { filename: "file1.js" },
-      { filename: "file2.md" },
-      { filename: "file3.py" }
+      { filename: "backend/report.pdf" },
+      { filename: "frontend/docs.md" },
+      { filename: "frontend/app.js" }
     ]);
 
   // Mock the initial comment, detailed comment, review request, and confirmation comment
@@ -496,11 +491,13 @@ patterns:
     .post(
       "/repos/robandpdx/advanced-codeowners-aws/pulls/777/requested_reviewers",
       (requestBody) => {
-        const expectedReviewers = ["dev1", "dev2", "writer"];
         assert.ok(Array.isArray(requestBody.reviewers), "Should send reviewers array");
-        assert.equal(requestBody.reviewers.length, 3, "Should request 3 unique reviewers");
-        expectedReviewers.forEach(reviewer => {
-          assert.ok(requestBody.reviewers.includes(reviewer), `Should include ${reviewer}`);
+        assert.ok(requestBody.reviewers.includes("tclifton_volcano"), "Should include tclifton_volcano");
+        
+        assert.ok(Array.isArray(requestBody.team_reviewers), "Should send team_reviewers array");
+        const expectedTeams = ["pfd-team", "markdown-team", "frontend-team"];
+        expectedTeams.forEach(team => {
+          assert.ok(requestBody.team_reviewers.includes(team), `Should include ${team}`);
         });
         return true;
       }
@@ -537,9 +534,12 @@ test("requestReviewsFromApprovers function handles empty approvers gracefully", 
   // Test with no approvers - should not make any API calls
   process.env.CONFIG_PATH = ".github/approvers";
 
-  const configContent = Buffer.from(`
+  // Create a config that won't match any files
+  const emptyConfigContent = Buffer.from(`
 patterns:
-  "*.xyz": ["some-dev"]
+  - pattern: "*.xyz"
+    owners:
+    - "some-dev"
 # No patterns match our test files
 `).toString('base64');
 
@@ -547,7 +547,7 @@ patterns:
     .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Fempty-approvers.yaml")
     .query({ ref: "main" })
     .reply(200, {
-      content: configContent,
+      content: emptyConfigContent,
       encoding: "base64"
     });
 

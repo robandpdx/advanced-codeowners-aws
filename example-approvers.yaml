@@ -1,33 +1,22 @@
 patterns:
   - pattern: "backend/**/*.pdf"
-    owners:
-    - pdf
+    team-owners:
+    - "pfd-team"
   - pattern: "backend/**/*"
     owners:
-    - backend
+    - "tclifton_volcano"
+    team-owners:
+    - "backend-team"
   - pattern: "frontend/**/*.pdf"
-    owners:
-    - pdf
+    team-owners:
+    - "pdf-team"
   - pattern: "frontend/**/*.md"
     owners:
-    - md
+    - "tclifton_volcano"
+    team-owners:
+    - "markdown-team"
   - pattern: "frontend/**/*"
     owners:
-    - frontend
-groups:
-  - name: backend
-    owners:
-    - alice
-    - bob
-  - name: frontend
-    owners:
-    - dave
-    - eve
-  - name: pdf
-    owners:
-    - carol
-    - dave
-  - name: md
-    owners:
-    - eve
-    - frank
+    - "tclifton_volcano"
+    team-owners:
+    - "frontend-team"
