@@ -95,6 +95,54 @@ module.exports = (app) => {
   }
 
   /**
+   * Request reviews from all approvers and post confirmation/error comments
+   * @param {object} context - Probot context object
+   * @param {object} pull_request - Pull request object
+   * @param {Map<string, string[]>} fileApproverMap - Map of file paths to arrays of approvers
+   * @returns {Promise<void>}
+   */
+  async function requestReviewsFromApprovers(context, pull_request, fileApproverMap) {
+    // Collect all unique approvers from the fileApproverMap
+    const allApprovers = new Set();
+    for (const approvers of fileApproverMap.values()) {
+      approvers.forEach(approver => allApprovers.add(approver));
+    }
+
+    // Request reviews from all unique approvers
+    if (allApprovers.size > 0) {
+      const reviewers = Array.from(allApprovers);
+      console.log(`Requesting reviews from: ${reviewers.join(', ')}`);
+      
+      try {
+        await context.octokit.pulls.requestReviewers({
+          owner: context.payload.repository.owner.login,
+          repo: context.payload.repository.name,
+          pull_number: pull_request.number,
+          reviewers: reviewers
+        });
+        
+        // Post confirmation comment
+        await context.octokit.issues.createComment({
+          owner: context.payload.repository.owner.login,
+          repo: context.payload.repository.name,
+          issue_number: pull_request.number,
+          body: `✅ Review requests have been sent to: ${reviewers.join(', ')}`
+        });
+      } catch (error) {
+        console.error('Failed to request reviews:', error.message);
+        
+        // Post error comment
+        await context.octokit.issues.createComment({
+          owner: context.payload.repository.owner.login,
+          repo: context.payload.repository.name,
+          issue_number: pull_request.number,
+          body: `⚠️ Failed to request reviews from some approvers. Error: ${error.message}`
+        });
+      }
+    }
+  }
+
+  /**
    * Generate a detailed comment body with file approvers
    * @param {Map<string, string[]>} fileApproverMap - Map of file paths to arrays of approvers
    * @returns {string} - Formatted comment body
@@ -203,6 +251,9 @@ module.exports = (app) => {
         issue_number: pull_request.number,
         body: commentBody
       });
+
+      // Request reviews from all approvers
+      await requestReviewsFromApprovers(context, pull_request, fileApproverMap);
 
       }
   });
