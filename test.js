@@ -42,11 +42,22 @@ test("receives pull_request.review_requested event when team ending with -approv
 
   // Mock the config file read
   const configContent = Buffer.from(`
-approvers:
-  - user1
-  - user2
-fallback:
-  - admin
+patterns:
+  - pattern: "backend/**/*.pdf"
+    owners:
+    - pdf
+  - pattern: "backend/**/*"
+    owners:
+    - backend
+groups:
+  - name: backend
+    owners:
+    - alice
+    - bob
+  - name: pdf
+    owners:
+    - carol
+    - dave
 `).toString('base64');
 
   const configMock = nock("https://api.github.com")
@@ -138,7 +149,7 @@ test("handles config file not found gracefully", async function () {
     .post(
       "/repos/robandpdx/advanced-codeowners-aws/issues/789/comments",
       (requestBody) => {
-        assert.equal(requestBody, { body: "Finding appropriate reviewers for this PR..." });
+        assert.equal(requestBody, { body: "No approvers configuration found at `.github/approvers/frontend-approvers.yaml`. Please check the file path and try again." });
         return true;
       }
     )

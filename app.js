@@ -49,6 +49,17 @@ module.exports = (app) => {
       const configPath = `${process.env.CONFIG_PATH}/${requested_team.name}.yaml`;
       const approversConfig = await readApproversConfig(configPath, context);
 
+      // if approversConfig is null, post comment to the PR saying the configPath was not found
+      if (!approversConfig) {
+        console.log(`No approvers config found at ${configPath}`);
+        return context.octokit.issues.createComment({
+          owner: context.payload.repository.owner.login,
+          repo: context.payload.repository.name,
+          issue_number: pull_request.number,
+          body: `No approvers configuration found at \`${configPath}\`. Please check the file path and try again.`
+        });
+      }
+
       // Comment on the PR
       return context.octokit.issues.createComment({
         owner: context.payload.repository.owner.login,
