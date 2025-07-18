@@ -441,20 +441,16 @@ module.exports = (app) => {
     // Generate comment about what this approval satisfies
     let commentBody = `## ✅ Review Approval Received\n\n`;
     commentBody += `**Reviewer:** @${review.user.login}\n`;
-    commentBody += `**Files satisfied by this approval:**\n`;
-    
-    satisfaction.satisfiedFiles.forEach(file => {
-      commentBody += `- \`${file}\`\n`;
-    });
-    
-    commentBody += `\n**Approval capacity:**\n`;
+    commentBody += `**Review requests satisfied by this approval:**\n`;
     
     if (satisfaction.satisfiedAsIndividual) {
-      commentBody += `- ✅ Individual approver\n`;
+      commentBody += `- ✅ Individual owner: @${review.user.login}\n`;
     }
     
     if (satisfaction.satisfiedAsTeamMember.length > 0) {
-      commentBody += `- ✅ Team member of: ${satisfaction.satisfiedAsTeamMember.join(', ')}\n`;
+      satisfaction.satisfiedAsTeamMember.forEach(team => {
+        commentBody += `- ✅ Team owner: @${team}\n`;
+      });
     }
     
     // Post the comment

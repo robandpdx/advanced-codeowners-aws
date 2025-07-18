@@ -627,9 +627,9 @@ test("handles pull_request_review.submitted event for approved reviews", async f
       (requestBody) => {
         assert.ok(requestBody.body.includes("## ✅ Review Approval Received"), "Should contain approval header");
         assert.ok(requestBody.body.includes("@tclifton_volcano"), "Should mention the reviewer");
-        assert.ok(requestBody.body.includes("frontend/app.js"), "Should list satisfied files");
-        assert.ok(requestBody.body.includes("Individual approver"), "Should show individual approver status");
-        assert.ok(requestBody.body.includes("Team member of: frontend-team"), "Should show team membership");
+        assert.ok(requestBody.body.includes("Review requests satisfied by this approval"), "Should show satisfied review requests");
+        assert.ok(requestBody.body.includes("Individual owner: @tclifton_volcano"), "Should show individual owner status");
+        assert.ok(requestBody.body.includes("Team owner: @frontend-team"), "Should show team owner");
         return true;
       }
     )
