@@ -601,16 +601,7 @@ test("handles pull_request_review.submitted event for approved reviews", async f
     .reply(200, {
       content: configContent,
       encoding: "base64"
-    })
-    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Fbackend-approvers.yaml")
-    .query({ ref: "main" })
-    .reply(404, { message: "Not Found" })
-    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffullstack-approvers.yaml")
-    .query({ ref: "main" })
-    .reply(404, { message: "Not Found" })
-    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Fplatform-approvers.yaml")
-    .query({ ref: "main" })
-    .reply(404, { message: "Not Found" });
+    });
 
   // Mock the PR files list
   const filesMock = nock("https://api.github.com")
@@ -659,7 +650,12 @@ test("handles pull_request_review.submitted event for approved reviews", async f
         number: 456,
         base: {
           ref: "main"
-        }
+        },
+        requested_teams: [
+          {
+            name: "frontend-approvers"
+          }
+        ]
       },
       review: {
         state: "approved",
@@ -671,7 +667,7 @@ test("handles pull_request_review.submitted event for approved reviews", async f
   });
 
   // Verify all mocks were called
-  assert.ok(configMock.isDone(), "Config files should have been checked");
+  assert.ok(configMock.isDone(), "Config file should have been checked");
   assert.ok(filesMock.isDone(), "PR files should have been fetched");
   assert.ok(teamMembershipMock.isDone(), "Team memberships should have been checked");
   assert.ok(commentMock.isDone(), "Approval comment should have been posted");
@@ -719,16 +715,7 @@ test("handles pull_request_review.submitted when reviewer doesn't satisfy any re
     .reply(200, {
       content: configContent,
       encoding: "base64"
-    })
-    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Fbackend-approvers.yaml")
-    .query({ ref: "main" })
-    .reply(404, { message: "Not Found" })
-    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffullstack-approvers.yaml")
-    .query({ ref: "main" })
-    .reply(404, { message: "Not Found" })
-    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Fplatform-approvers.yaml")
-    .query({ ref: "main" })
-    .reply(404, { message: "Not Found" });
+    });
 
   // Mock the PR files list
   const filesMock = nock("https://api.github.com")
@@ -759,7 +746,12 @@ test("handles pull_request_review.submitted when reviewer doesn't satisfy any re
         number: 999,
         base: {
           ref: "main"
-        }
+        },
+        requested_teams: [
+          {
+            name: "frontend-approvers"
+          }
+        ]
       },
       review: {
         state: "approved",
@@ -771,7 +763,7 @@ test("handles pull_request_review.submitted when reviewer doesn't satisfy any re
   });
 
   // Verify mocks were called but no comment was posted
-  assert.ok(configMock.isDone(), "Config files should have been checked");
+  assert.ok(configMock.isDone(), "Config file should have been checked");
   assert.ok(filesMock.isDone(), "PR files should have been fetched");
   assert.ok(teamMembershipMock.isDone(), "Team membership should have been checked");
 });

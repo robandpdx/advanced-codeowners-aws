@@ -407,79 +407,62 @@ module.exports = (app) => {
 
     console.log(`Review approved by ${review.user.login} for PR #${pull_request.number}`);
 
-    // Try to find approver configs that might be relevant
-    // We'll check common config files ending with -approvers
-    const commonConfigNames = [
-      'frontend-approvers.yaml',
-      'backend-approvers.yaml',
-      'fullstack-approvers.yaml',
-      'platform-approvers.yaml'
-    ];
+    // Find the requested team that ends with -approvers
+    const requestedTeams = pull_request.requested_teams || [];
+    const approverTeam = requestedTeams.find(team => team.name.endsWith('-approvers'));
     
-    let totalSatisfiedFiles = [];
-    let allSatisfactions = [];
-    
-    for (const configName of commonConfigNames) {
-      const configPath = `${process.env.CONFIG_PATH}/${configName}`;
-      const approversConfig = await readApproversConfig(configPath, context);
-      
-      if (!approversConfig) {
-        continue; // Skip if config doesn't exist
-      }
+    if (!approverTeam) {
+      console.log(`No approver team found in requested_teams for PR #${pull_request.number}`);
+      return;
+    }
 
-      // Find approvers for the files in the PR
-      const { fileApproverMap, fileTeamApproverMap } = await findApprovers(context, pull_request, approversConfig);
-      
-      // Check if this reviewer satisfies any requirements
-      const satisfaction = await checkReviewerSatisfaction(context, review.user.login, fileApproverMap, fileTeamApproverMap);
-      
-      if (satisfaction.satisfiedFiles.length > 0) {
-        satisfaction.configName = configName;
-        allSatisfactions.push(satisfaction);
-        totalSatisfiedFiles.push(...satisfaction.satisfiedFiles);
-      }
+    console.log(`Found approver team: ${approverTeam.name}`);
+
+    // Load the config file for this specific team
+    const configPath = `${process.env.CONFIG_PATH}/${approverTeam.name}.yaml`;
+    const approversConfig = await readApproversConfig(configPath, context);
+    
+    if (!approversConfig) {
+      console.log(`No approvers config found at ${configPath}`);
+      return;
+    }
+
+    // Find approvers for the files in the PR
+    const { fileApproverMap, fileTeamApproverMap } = await findApprovers(context, pull_request, approversConfig);
+    
+    // Check if this reviewer satisfies any requirements
+    const satisfaction = await checkReviewerSatisfaction(context, review.user.login, fileApproverMap, fileTeamApproverMap);
+    
+    if (satisfaction.satisfiedFiles.length === 0) {
+      console.log(`Review by ${review.user.login} does not satisfy any approver requirements`);
+      return;
     }
     
-    // Remove duplicates from satisfied files
-    const uniqueSatisfiedFiles = [...new Set(totalSatisfiedFiles)];
+    // Generate comment about what this approval satisfies
+    let commentBody = `## ✅ Review Approval Received\n\n`;
+    commentBody += `**Reviewer:** @${review.user.login}\n`;
+    commentBody += `**Files satisfied by this approval:**\n`;
     
-    if (uniqueSatisfiedFiles.length > 0) {
-      // Generate comment about what this approval satisfies
-      let commentBody = `## ✅ Review Approval Received\n\n`;
-      commentBody += `**Reviewer:** @${review.user.login}\n`;
-      commentBody += `**Files satisfied by this approval:**\n`;
-      
-      uniqueSatisfiedFiles.forEach(file => {
-        commentBody += `- \`${file}\`\n`;
-      });
-      
-      commentBody += `\n**Approval capacity:**\n`;
-      
-      let isIndividualApprover = false;
-      const allTeamMemberships = new Set();
-      
-      allSatisfactions.forEach(satisfaction => {
-        if (satisfaction.satisfiedAsIndividual) {
-          isIndividualApprover = true;
-        }
-        satisfaction.satisfiedAsTeamMember.forEach(team => allTeamMemberships.add(team));
-      });
-      
-      if (isIndividualApprover) {
-        commentBody += `- ✅ Individual approver\n`;
-      }
-      
-      if (allTeamMemberships.size > 0) {
-        commentBody += `- ✅ Team member of: ${Array.from(allTeamMemberships).join(', ')}\n`;
-      }
-      
-      // Post the comment
-      await context.octokit.issues.createComment({
-        owner: context.payload.repository.owner.login,
-        repo: context.payload.repository.name,
-        issue_number: pull_request.number,
-        body: commentBody
-      });
+    satisfaction.satisfiedFiles.forEach(file => {
+      commentBody += `- \`${file}\`\n`;
+    });
+    
+    commentBody += `\n**Approval capacity:**\n`;
+    
+    if (satisfaction.satisfiedAsIndividual) {
+      commentBody += `- ✅ Individual approver\n`;
     }
+    
+    if (satisfaction.satisfiedAsTeamMember.length > 0) {
+      commentBody += `- ✅ Team member of: ${satisfaction.satisfiedAsTeamMember.join(', ')}\n`;
+    }
+    
+    // Post the comment
+    await context.octokit.issues.createComment({
+      owner: context.payload.repository.owner.login,
+      repo: context.payload.repository.name,
+      issue_number: pull_request.number,
+      body: commentBody
+    });
   });
 };
