@@ -349,6 +349,163 @@ module.exports = (app) => {
     return { satisfiedFiles, satisfiedAsIndividual, satisfiedAsTeamMember };
   }
 
+  /**
+   * Get all approved reviews for a pull request
+   * @param {object} context - Probot context object
+   * @param {number} pullNumber - Pull request number
+   * @returns {Promise<Array>} - Array of approved reviews
+   */
+  async function getAllApprovedReviews(context, pullNumber) {
+    try {
+      const reviews = await context.octokit.pulls.listReviews({
+        owner: context.payload.repository.owner.login,
+        repo: context.payload.repository.name,
+        pull_number: pullNumber
+      });
+      
+      // Filter for approved reviews and get the latest review per user
+      const latestReviewsByUser = new Map();
+      
+      for (const review of reviews.data) {
+        const userId = review.user.login;
+        if (!latestReviewsByUser.has(userId) || 
+            new Date(review.submitted_at) > new Date(latestReviewsByUser.get(userId).submitted_at)) {
+          latestReviewsByUser.set(userId, review);
+        }
+      }
+      
+      // Return only approved reviews
+      return Array.from(latestReviewsByUser.values()).filter(review => review.state === 'APPROVED');
+    } catch (error) {
+      console.error('Failed to get approved reviews:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Check if all approval criteria have been met for a pull request
+   * @param {object} context - Probot context object
+   * @param {object} pull_request - Pull request object
+   * @param {Map<string, string[]>} fileApproverMap - Map of file paths to arrays of approvers
+   * @param {Map<string, string[]>} fileTeamApproverMap - Map of file paths to arrays of team approvers
+   * @returns {Promise<{allCriteriaMet: boolean, satisfiedFiles: Set<string>, approverSummary: Array}>}
+   */
+  async function checkAllApprovalCriteriaMet(context, pull_request, fileApproverMap, fileTeamApproverMap) {
+    // Get all approved reviews
+    const approvedReviews = await getAllApprovedReviews(context, pull_request.number);
+    
+    if (approvedReviews.length === 0) {
+      return { allCriteriaMet: false, satisfiedFiles: new Set(), approverSummary: [] };
+    }
+    
+    const satisfiedFiles = new Set();
+    const approverSummary = [];
+    
+    // Check each approved reviewer
+    for (const review of approvedReviews) {
+      const satisfaction = await checkReviewerSatisfaction(
+        context, 
+        review.user.login, 
+        fileApproverMap, 
+        fileTeamApproverMap
+      );
+      
+      if (satisfaction.satisfiedFiles.length > 0) {
+        // Add satisfied files to our set
+        satisfaction.satisfiedFiles.forEach(file => satisfiedFiles.add(file));
+        
+        // Add to summary
+        approverSummary.push({
+          reviewer: review.user.login,
+          satisfiedAsIndividual: satisfaction.satisfiedAsIndividual,
+          satisfiedAsTeamMember: satisfaction.satisfiedAsTeamMember,
+          satisfiedFiles: satisfaction.satisfiedFiles
+        });
+      }
+    }
+    
+    // Check if all files are satisfied
+    const allFiles = new Set(fileApproverMap.keys());
+    const allCriteriaMet = allFiles.size > 0 && [...allFiles].every(file => satisfiedFiles.has(file));
+    
+    return { allCriteriaMet, satisfiedFiles, approverSummary };
+  }
+
+  /**
+   * Approve a pull request using GITHUB_TOKEN
+   * @param {object} context - Probot context object
+   * @param {number} pullNumber - Pull request number
+   * @returns {Promise<boolean>} - Success status
+   */
+  async function approvePullRequest(context, pullNumber) {
+    if (!process.env.GITHUB_TOKEN) {
+      console.error('GITHUB_TOKEN not provided for final approval');
+      return false;
+    }
+    
+    try {
+      // Create a new Octokit instance with the GITHUB_TOKEN
+      const { Octokit } = require('@octokit/rest');
+      const octokit = new Octokit({
+        auth: process.env.GITHUB_TOKEN
+      });
+      
+      await octokit.pulls.createReview({
+        owner: context.payload.repository.owner.login,
+        repo: context.payload.repository.name,
+        pull_number: pullNumber,
+        event: 'APPROVE',
+        body: '✅ All required approvals have been received. Auto-approving this pull request.'
+      });
+      
+      console.log(`Successfully approved PR #${pullNumber}`);
+      return true;
+    } catch (error) {
+      console.error(`Failed to approve PR #${pullNumber}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Generate final approval summary comment
+   * @param {Array} approverSummary - Summary of approvers and what they satisfied
+   * @param {Set<string>} satisfiedFiles - Set of all satisfied files
+   * @returns {string} - Formatted comment body
+   */
+  function generateFinalApprovalComment(approverSummary, satisfiedFiles) {
+    let commentBody = `## 🎉 All Required Approvals Received!\n\n`;
+    commentBody += `All approval criteria have been met for this pull request.\n\n`;
+    
+    if (approverSummary.length > 0) {
+      commentBody += `### 👥 Approval Summary:\n\n`;
+      
+      approverSummary.forEach(summary => {
+        commentBody += `**@${summary.reviewer}**\n`;
+        
+        if (summary.satisfiedAsIndividual) {
+          commentBody += `- ✅ Individual approver\n`;
+        }
+        
+        if (summary.satisfiedAsTeamMember.length > 0) {
+          summary.satisfiedAsTeamMember.forEach(team => {
+            commentBody += `- ✅ Team member: @${team}\n`;
+          });
+        }
+        
+        commentBody += `- 📁 Files approved: ${summary.satisfiedFiles.length} file(s)\n\n`;
+      });
+      
+      commentBody += `### 📋 Coverage Summary:\n`;
+      commentBody += `- **Total files requiring approval:** ${satisfiedFiles.size}\n`;
+      commentBody += `- **Files with adequate approval:** ${satisfiedFiles.size}\n`;
+      commentBody += `- **Approval coverage:** 100% ✅\n\n`;
+    }
+    
+    commentBody += `This pull request has been automatically approved.`;
+    
+    return commentBody;
+  }
+
   app.on("pull_request.review_requested", async (context) => {
     const { pull_request, requested_team } = context.payload;
     
@@ -460,5 +617,38 @@ module.exports = (app) => {
       issue_number: pull_request.number,
       body: commentBody
     });
+    
+    // Check if all approval criteria have been met
+    const approvalStatus = await checkAllApprovalCriteriaMet(context, pull_request, fileApproverMap, fileTeamApproverMap);
+    
+    if (approvalStatus.allCriteriaMet) {
+      console.log(`All approval criteria met for PR #${pull_request.number}. Proceeding with final approval.`);
+      
+      // Generate final approval comment
+      const finalCommentBody = generateFinalApprovalComment(approvalStatus.approverSummary, approvalStatus.satisfiedFiles);
+      
+      // Post final approval comment
+      await context.octokit.issues.createComment({
+        owner: context.payload.repository.owner.login,
+        repo: context.payload.repository.name,
+        issue_number: pull_request.number,
+        body: finalCommentBody
+      });
+      
+      // Approve the PR using GITHUB_TOKEN
+      const approvalSuccess = await approvePullRequest(context, pull_request.number);
+      
+      if (!approvalSuccess) {
+        // Post error comment if approval failed
+        await context.octokit.issues.createComment({
+          owner: context.payload.repository.owner.login,
+          repo: context.payload.repository.name,
+          issue_number: pull_request.number,
+          body: "⚠️ All approval criteria have been met, but automatic approval failed. Please check the GITHUB_TOKEN configuration."
+        });
+      }
+    } else {
+      console.log(`Not all approval criteria met yet for PR #${pull_request.number}. ${approvalStatus.satisfiedFiles.size} files satisfied so far.`);
+    }
   });
 };

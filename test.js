@@ -768,4 +768,333 @@ test("handles pull_request_review.submitted when reviewer doesn't satisfy any re
   assert.ok(teamMembershipMock.isDone(), "Team membership should have been checked");
 });
 
+test("approves PR when all approval criteria are met", async function () {
+  // Set CONFIG_PATH and GITHUB_TOKEN environment variables
+  process.env.CONFIG_PATH = ".github/approvers";
+  process.env.GITHUB_TOKEN = "test-github-token";
+
+  const configMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(200, {
+      content: configContent,
+      encoding: "base64"
+    });
+
+  // Mock the PR files list - single file that can be satisfied by tclifton_volcano as individual owner
+  const filesMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/pulls/456/files")
+    .reply(200, [
+      { filename: "frontend/app.js" }
+    ]);
+
+  // Mock team membership check (not needed since tclifton_volcano is individual owner)
+  const teamMembershipMock = nock("https://api.github.com")
+    .get("/orgs/robandpdx/teams/frontend-team/memberships/tclifton_volcano")
+    .reply(404, { message: "Not Found" });
+
+  // Mock the reviews list - tclifton_volcano has already approved
+  const reviewsMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/pulls/456/reviews")
+    .reply(200, [
+      {
+        user: { login: "tclifton_volcano" },
+        state: "APPROVED",
+        submitted_at: "2023-01-01T00:00:00Z"
+      }
+    ]);
+
+  // Mock the approval comment
+  const approvalCommentMock = nock("https://api.github.com")
+    .post(
+      "/repos/robandpdx/advanced-codeowners-aws/issues/456/comments",
+      (requestBody) => {
+        assert.ok(requestBody.body.includes("## ✅ Review Approval Received"), "Should contain approval header");
+        return true;
+      }
+    )
+    .reply(201, {});
+
+  // Mock the final approval comment
+  const finalCommentMock = nock("https://api.github.com")
+    .post(
+      "/repos/robandpdx/advanced-codeowners-aws/issues/456/comments",
+      (requestBody) => {
+        assert.ok(requestBody.body.includes("## 🎉 All Required Approvals Received!"), "Should contain final approval header");
+        assert.ok(requestBody.body.includes("@tclifton_volcano"), "Should mention the reviewer");
+        assert.ok(requestBody.body.includes("Individual approver"), "Should show individual approval");
+        assert.ok(requestBody.body.includes("Approval coverage:** 100% ✅"), "Should show 100% coverage");
+        return true;
+      }
+    )
+    .reply(201, {});
+
+  // Mock the PR approval using GITHUB_TOKEN
+  const prApprovalMock = nock("https://api.github.com")
+    .post(
+      "/repos/robandpdx/advanced-codeowners-aws/pulls/456/reviews",
+      (requestBody) => {
+        assert.ok(requestBody.event === "APPROVE", "Should approve the PR");
+        assert.ok(requestBody.body.includes("All required approvals have been received"), "Should include approval message");
+        return true;
+      }
+    )
+    .reply(200, {});
+
+  await probot.receive({
+    name: "pull_request_review",
+    id: "11",
+    payload: {
+      action: "submitted",
+      repository: {
+        owner: {
+          login: "robandpdx",
+        },
+        name: "advanced-codeowners-aws",
+      },
+      pull_request: {
+        number: 456,
+        base: {
+          ref: "main"
+        },
+        requested_teams: [
+          {
+            name: "frontend-approvers"
+          }
+        ]
+      },
+      review: {
+        state: "approved",
+        user: {
+          login: "tclifton_volcano"
+        }
+      }
+    },
+  });
+
+  // Verify all mocks were called
+  assert.ok(configMock.isDone(), "Config file should have been checked");
+  assert.ok(filesMock.isDone(), "PR files should have been fetched");
+  assert.ok(teamMembershipMock.isDone(), "Team membership should have been checked");
+  assert.ok(reviewsMock.isDone(), "Reviews should have been fetched");
+  assert.ok(approvalCommentMock.isDone(), "Approval comment should have been posted");
+  assert.ok(finalCommentMock.isDone(), "Final approval comment should have been posted");
+  assert.ok(prApprovalMock.isDone(), "PR should have been approved");
+  
+  // Clean up
+  delete process.env.GITHUB_TOKEN;
+});
+
+test("does not approve PR when not all criteria are met", async function () {
+  // Set CONFIG_PATH environment variable
+  process.env.CONFIG_PATH = ".github/approvers";
+
+  // Create a special config that has a team-only pattern
+  const specialConfigContent = Buffer.from(`
+patterns:
+  - pattern: "frontend/**/*.js"
+    owners:
+    - "tclifton_volcano"
+    team-owners:
+    - "frontend-team"
+  - pattern: "special/**/*"
+    team-owners:
+    - "special-team"
+`).toString('base64');
+
+  const configMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(200, {
+      content: specialConfigContent,
+      encoding: "base64"
+    });
+
+  // Mock the PR files list - include a special file that requires special-team only
+  const filesMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/pulls/789/files")
+    .reply(200, [
+      { filename: "frontend/app.js" },  // tclifton_volcano can approve this
+      { filename: "special/config.txt" }  // requires special-team membership only
+    ]);
+
+  // Mock team membership check - tclifton_volcano is not in special-team
+  const teamMembershipMock = nock("https://api.github.com")
+    .get("/orgs/robandpdx/teams/frontend-team/memberships/tclifton_volcano")
+    .reply(404, { message: "Not Found" })
+    .get("/orgs/robandpdx/teams/special-team/memberships/tclifton_volcano")
+    .reply(404, { message: "Not Found" });
+
+  // Mock the reviews list - only tclifton_volcano has approved
+  const reviewsMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/pulls/789/reviews")
+    .reply(200, [
+      {
+        user: { login: "tclifton_volcano" },
+        state: "APPROVED",
+        submitted_at: "2023-01-01T00:00:00Z"
+      }
+    ]);
+
+  // Mock the approval comment
+  const approvalCommentMock = nock("https://api.github.com")
+    .post(
+      "/repos/robandpdx/advanced-codeowners-aws/issues/789/comments",
+      (requestBody) => {
+        assert.ok(requestBody.body.includes("## ✅ Review Approval Received"), "Should contain approval header");
+        return true;
+      }
+    )
+    .reply(201, {});
+
+  await probot.receive({
+    name: "pull_request_review",
+    id: "12",
+    payload: {
+      action: "submitted",
+      repository: {
+        owner: {
+          login: "robandpdx",
+        },
+        name: "advanced-codeowners-aws",
+      },
+      pull_request: {
+        number: 789,
+        base: {
+          ref: "main"
+        },
+        requested_teams: [
+          {
+            name: "frontend-approvers"
+          }
+        ]
+      },
+      review: {
+        state: "approved",
+        user: {
+          login: "tclifton_volcano"
+        }
+      }
+    },
+  });
+
+  // Verify mocks were called but no final approval occurred
+  assert.ok(configMock.isDone(), "Config file should have been checked");
+  assert.ok(filesMock.isDone(), "PR files should have been fetched");
+  assert.ok(teamMembershipMock.isDone(), "Team membership should have been checked");
+  assert.ok(reviewsMock.isDone(), "Reviews should have been fetched");
+  assert.ok(approvalCommentMock.isDone(), "Approval comment should have been posted");
+  // No final approval or comment mocks to verify
+});
+
+test("handles missing GITHUB_TOKEN gracefully", async function () {
+  // Set CONFIG_PATH but no GITHUB_TOKEN
+  process.env.CONFIG_PATH = ".github/approvers";
+
+  const configMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
+    .query({ ref: "main" })
+    .reply(200, {
+      content: configContent,
+      encoding: "base64"
+    });
+
+  // Mock the PR files list - single file that can be satisfied
+  const filesMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/pulls/321/files")
+    .reply(200, [
+      { filename: "frontend/app.js" }
+    ]);
+
+  // Mock team membership check
+  const teamMembershipMock = nock("https://api.github.com")
+    .get("/orgs/robandpdx/teams/frontend-team/memberships/tclifton_volcano")
+    .reply(404, { message: "Not Found" });
+
+  // Mock the reviews list
+  const reviewsMock = nock("https://api.github.com")
+    .get("/repos/robandpdx/advanced-codeowners-aws/pulls/321/reviews")
+    .reply(200, [
+      {
+        user: { login: "tclifton_volcano" },
+        state: "APPROVED",
+        submitted_at: "2023-01-01T00:00:00Z"
+      }
+    ]);
+
+  // Mock the approval comment
+  const approvalCommentMock = nock("https://api.github.com")
+    .post(
+      "/repos/robandpdx/advanced-codeowners-aws/issues/321/comments",
+      (requestBody) => {
+        assert.ok(requestBody.body.includes("## ✅ Review Approval Received"), "Should contain approval header");
+        return true;
+      }
+    )
+    .reply(201, {});
+
+  // Mock the final approval comment
+  const finalCommentMock = nock("https://api.github.com")
+    .post(
+      "/repos/robandpdx/advanced-codeowners-aws/issues/321/comments",
+      (requestBody) => {
+        assert.ok(requestBody.body.includes("## 🎉 All Required Approvals Received!"), "Should contain final approval header");
+        return true;
+      }
+    )
+    .reply(201, {});
+
+  // Mock the error comment for failed approval
+  const errorCommentMock = nock("https://api.github.com")
+    .post(
+      "/repos/robandpdx/advanced-codeowners-aws/issues/321/comments",
+      (requestBody) => {
+        assert.ok(requestBody.body.includes("⚠️ All approval criteria have been met, but automatic approval failed"), "Should contain error message");
+        assert.ok(requestBody.body.includes("GITHUB_TOKEN configuration"), "Should mention GITHUB_TOKEN issue");
+        return true;
+      }
+    )
+    .reply(201, {});
+
+  await probot.receive({
+    name: "pull_request_review",
+    id: "13",
+    payload: {
+      action: "submitted",
+      repository: {
+        owner: {
+          login: "robandpdx",
+        },
+        name: "advanced-codeowners-aws",
+      },
+      pull_request: {
+        number: 321,
+        base: {
+          ref: "main"
+        },
+        requested_teams: [
+          {
+            name: "frontend-approvers"
+          }
+        ]
+      },
+      review: {
+        state: "approved",
+        user: {
+          login: "tclifton_volcano"
+        }
+      }
+    },
+  });
+
+  // Verify all mocks were called
+  assert.ok(configMock.isDone(), "Config file should have been checked");
+  assert.ok(filesMock.isDone(), "PR files should have been fetched");
+  assert.ok(teamMembershipMock.isDone(), "Team membership should have been checked");
+  assert.ok(reviewsMock.isDone(), "Reviews should have been fetched");
+  assert.ok(approvalCommentMock.isDone(), "Approval comment should have been posted");
+  assert.ok(finalCommentMock.isDone(), "Final approval comment should have been posted");
+  assert.ok(errorCommentMock.isDone(), "Error comment should have been posted");
+});
+
 test.run();
