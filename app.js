@@ -401,6 +401,22 @@ module.exports = (app) => {
     const satisfiedFiles = new Set();
     const approverSummary = [];
     
+    // Collect all required individual and team approvers across all files
+    const requiredIndividuals = new Set();
+    const requiredTeams = new Set();
+    
+    for (const [filePath, approvers] of fileApproverMap) {
+      approvers.forEach(approver => requiredIndividuals.add(approver));
+    }
+    
+    for (const [filePath, teamApprovers] of fileTeamApproverMap) {
+      teamApprovers.forEach(team => requiredTeams.add(team));
+    }
+    
+    // Track which required reviewers have approved
+    const approvedIndividuals = new Set();
+    const approvedTeams = new Set();
+    
     // Check each approved reviewer
     for (const review of approvedReviews) {
       const satisfaction = await checkReviewerSatisfaction(
@@ -414,6 +430,14 @@ module.exports = (app) => {
         // Add satisfied files to our set
         satisfaction.satisfiedFiles.forEach(file => satisfiedFiles.add(file));
         
+        // Track individual approvals
+        if (satisfaction.satisfiedAsIndividual) {
+          approvedIndividuals.add(review.user.login);
+        }
+        
+        // Track team approvals
+        satisfaction.satisfiedAsTeamMember.forEach(team => approvedTeams.add(team));
+        
         // Add to summary
         approverSummary.push({
           reviewer: review.user.login,
@@ -424,9 +448,10 @@ module.exports = (app) => {
       }
     }
     
-    // Check if all files are satisfied
-    const allFiles = new Set(fileApproverMap.keys());
-    const allCriteriaMet = allFiles.size > 0 && [...allFiles].every(file => satisfiedFiles.has(file));
+    // Check if all required individuals and teams have approved
+    const allIndividualsApproved = [...requiredIndividuals].every(individual => approvedIndividuals.has(individual));
+    const allTeamsApproved = [...requiredTeams].every(team => approvedTeams.has(team));
+    const allCriteriaMet = allIndividualsApproved && allTeamsApproved && (requiredIndividuals.size > 0 || requiredTeams.size > 0);
     
     return { allCriteriaMet, satisfiedFiles, approverSummary };
   }
