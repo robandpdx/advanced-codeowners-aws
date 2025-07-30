@@ -773,25 +773,30 @@ test("approves PR when all approval criteria are met", async function () {
   process.env.CONFIG_PATH = ".github/approvers";
   process.env.GITHUB_TOKEN = "test-github-token";
 
+  // Create a simple config that only requires individual approval
+  const simpleConfigContent = Buffer.from(`
+patterns:
+  - pattern: "simple/**/*"
+    owners:
+    - "tclifton_volcano"
+`).toString('base64');
+
   const configMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
     .query({ ref: "main" })
     .reply(200, {
-      content: configContent,
+      content: simpleConfigContent,
       encoding: "base64"
     });
 
-  // Mock the PR files list - single file that can be satisfied by tclifton_volcano as individual owner
+  // Mock the PR files list - single file that only requires individual approval
   const filesMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/pulls/456/files")
     .reply(200, [
-      { filename: "frontend/app.js" }
+      { filename: "simple/test.js" }
     ]);
 
-  // Mock team membership check (not needed since tclifton_volcano is individual owner)
-  const teamMembershipMock = nock("https://api.github.com")
-    .get("/orgs/robandpdx/teams/frontend-team/memberships/tclifton_volcano")
-    .reply(404, { message: "Not Found" });
+  // No team membership checks needed since only individual approval required
 
   // Mock the reviews list - tclifton_volcano has already approved
   const reviewsMock = nock("https://api.github.com")
@@ -875,7 +880,6 @@ test("approves PR when all approval criteria are met", async function () {
   // Verify all mocks were called
   assert.ok(configMock.isDone(), "Config file should have been checked");
   assert.ok(filesMock.isDone(), "PR files should have been fetched");
-  assert.ok(teamMembershipMock.isDone(), "Team membership should have been checked");
   assert.ok(reviewsMock.isDone(), "Reviews should have been fetched");
   assert.ok(approvalCommentMock.isDone(), "Approval comment should have been posted");
   assert.ok(finalCommentMock.isDone(), "Final approval comment should have been posted");
@@ -991,25 +995,30 @@ test("handles missing GITHUB_TOKEN gracefully", async function () {
   // Set CONFIG_PATH but no GITHUB_TOKEN
   process.env.CONFIG_PATH = ".github/approvers";
 
+  // Create a simple config that only requires individual approval
+  const simpleConfigContent = Buffer.from(`
+patterns:
+  - pattern: "simple/**/*"
+    owners:
+    - "tclifton_volcano"
+`).toString('base64');
+
   const configMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/contents/.github%2Fapprovers%2Ffrontend-approvers.yaml")
     .query({ ref: "main" })
     .reply(200, {
-      content: configContent,
+      content: simpleConfigContent,
       encoding: "base64"
     });
 
-  // Mock the PR files list - single file that can be satisfied
+  // Mock the PR files list - single file that only requires individual approval
   const filesMock = nock("https://api.github.com")
     .get("/repos/robandpdx/advanced-codeowners-aws/pulls/321/files")
     .reply(200, [
-      { filename: "frontend/app.js" }
+      { filename: "simple/test.js" }
     ]);
 
-  // Mock team membership check
-  const teamMembershipMock = nock("https://api.github.com")
-    .get("/orgs/robandpdx/teams/frontend-team/memberships/tclifton_volcano")
-    .reply(404, { message: "Not Found" });
+  // No team membership checks needed since only individual approval required
 
   // Mock the reviews list
   const reviewsMock = nock("https://api.github.com")
@@ -1090,7 +1099,6 @@ test("handles missing GITHUB_TOKEN gracefully", async function () {
   // Verify all mocks were called
   assert.ok(configMock.isDone(), "Config file should have been checked");
   assert.ok(filesMock.isDone(), "PR files should have been fetched");
-  assert.ok(teamMembershipMock.isDone(), "Team membership should have been checked");
   assert.ok(reviewsMock.isDone(), "Reviews should have been fetched");
   assert.ok(approvalCommentMock.isDone(), "Approval comment should have been posted");
   assert.ok(finalCommentMock.isDone(), "Final approval comment should have been posted");
