@@ -469,8 +469,8 @@ module.exports = (app) => {
     }
     
     try {
-      // Create a new Octokit instance with the GITHUB_TOKEN
-      const { Octokit } = require('@octokit/rest');
+      // Create a new Octokit instance with the GITHUB_TOKEN using dynamic import for ES module
+      const { Octokit } = await import('@octokit/rest');
       const octokit = new Octokit({
         auth: process.env.GITHUB_TOKEN
       });
