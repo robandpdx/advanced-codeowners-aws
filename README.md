@@ -15,6 +15,7 @@ frontend-approvers
 backend-approvers
 ```
 Add the bot user to each team.
+You'll need to give each team write access to the repos where you are using this app.
 ###  Config files
 You'll add a `yaml` config file to the repo for each team in `$CONFIG_PATH/`, naming the config file for each team as follows:
 | Team Name         | Config File Path                |
