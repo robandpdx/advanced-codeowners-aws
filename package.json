@@ -11,7 +11,7 @@
   "dependencies": {
     "@octokit/rest": "^22.0.0",
     "@probot/adapter-aws-lambda-serverless": "^4.0.2",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^4.1.1",
     "minimatch": "^10.0.3"
   },
   "repository": "github:robandpdx/advanced-codeowners-aws",
